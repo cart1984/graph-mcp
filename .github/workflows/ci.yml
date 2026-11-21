@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: ${{ matrix.python }}
+      - run: uv sync --locked
+      - run: uv run ruff check
+      - run: uv run ruff format --check
+      - run: uv run pyright
+      - run: uv run pytest
+
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Settings for the compose stack (no real sign-in in CI)
+        run: |
+          {
+            echo "GRAPH_MCP_CLIENT_ID=00000000-0000-0000-0000-000000000000"
+            echo "GRAPH_MCP_TOKEN=$(openssl rand -hex 32)"
+            echo "GRAPH_MCP_BIND=127.0.0.1"
+            echo "TZ=America/New_York"
+          } > .env
+      - run: docker compose config --quiet
+      - run: docker compose build
+      - run: docker compose run --rm graph --version
+      - run: docker compose up -d
+      - name: Health says "not signed in", and /mcp needs the token
+        run: |
+          for i in $(seq 30); do
+            code=$(curl -s -o health.json -w '%{http_code}' http://127.0.0.1:8766/healthz || true)
+            [ "$code" = 503 ] && break
+            sleep 2
+          done
+          cat health.json
+          test "$code" = 503
+          grep -q '"status": "not signed in"' health.json
+          test "$(curl -s -o /dev/null -w '%{http_code}' -X POST http://127.0.0.1:8766/mcp)" = 401
+      - name: The container is locked down as compose.yaml says
+        run: |
+          id=$(docker compose ps -q graph)
+          test "$(docker inspect -f '{{.HostConfig.ReadonlyRootfs}}' "$id")" = true
+          test "$(docker inspect -f '{{json .HostConfig.CapDrop}}' "$id")" = '["ALL"]'
+          docker inspect -f '{{json .HostConfig.SecurityOpt}}' "$id" | grep -q 'no-new-privileges:true'
+          test "$(docker inspect -f '{{.Config.User}}' "$id")" = graph
+          test "$(docker inspect -f '{{json .HostConfig.PortBindings}}' "$id")" = '{"8766/tcp":[{"HostIp":"127.0.0.1","HostPort":"8766"}]}'
+          if docker compose exec -T graph touch /app/x; then echo "the root file system is writable"; exit 1; fi
+      - if: always()
+        run: docker compose logs && docker compose down -v
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

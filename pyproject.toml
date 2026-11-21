@@ -1,0 +1,49 @@
+[project]
+name = "graph-mcp"
+version = "0.1.0"
+description = "A read-only MCP server for Microsoft Graph: Outlook mail, OneDrive, OneNote, calendar and contacts."
+readme = "README.md"
+authors = [{ name = "cart1984" }]
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.12"
+dependencies = [
+    "anyio>=4",
+    "httpx>=0.28",
+    "keyring>=25",
+    "markitdown[docx,pdf,pptx,xlsx]>=0.1",
+    "mcp>=2.3.0",
+    "msal>=1.31",
+    "starlette>=1",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+graph-mcp = "graph_mcp.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.13.7,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.414",
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]
+
+[tool.ruff]
+line-length = 120
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM", "RUF"]
+
+[tool.pyright]
+include = ["src", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
