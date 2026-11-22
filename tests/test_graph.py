@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import io
 from pathlib import Path
 
 import httpx
 import pytest
+from openpyxl import Workbook
 
 from conftest import FakeGraph, make_graph
-from graph_mcp.graph import Graph, GraphError, convert, looks_binary, unique_path
+from graph_mcp.graph import Graph, GraphError, convert, looks_binary, tidy, tidy_tables, unique_path
 
 # ---- the client ----
 
@@ -119,3 +121,53 @@ def test_same_names_do_not_overwrite(tmp_path: Path) -> None:
 @pytest.mark.parametrize("name", ["../../etc/passwd", "..", "/abs/path.txt", "a\\b.txt"])
 def test_unique_path_stays_in_the_folder(tmp_path: Path, name: str) -> None:
     assert unique_path(tmp_path, name, b"x").parent == tmp_path
+
+
+def test_tidy_drops_pictures_and_invisible_padding() -> None:
+    picture = "data:image/png;base64," + "iVBORw0KGgo" * 300 + "=="
+    assert tidy(f"Logo [{picture}] here") == "Logo [image] here"
+    assert tidy("Preview͏ ‌͏ ‌­text﻿") == "Preview  text"
+    assert tidy("family 👨‍👩‍👧") == "family 👨‍👩‍👧"  # the emoji joiner stays
+
+
+def test_tables_lose_nan_unnamed_and_empty_rows_and_columns() -> None:
+    sheet = [
+        "## Cars",
+        "| Unnamed: 0 | Unnamed: 1 | Unnamed: 2 | Unnamed: 3 |",
+        "| --- | --- | --- | --- |",
+        "| NaN | Make | Model | NaN |",
+        "| NaN | NaN | NaN | NaN |",
+        "| NaN | Honda | Odyssey \\| EX | NaN |",
+        "",
+        "Notes after the table",
+    ]
+    assert tidy_tables("\n".join(sheet)).splitlines() == [
+        "## Cars",
+        "| Make | Model |",  # no header left: the first row becomes it
+        "| --- | --- |",
+        "| Honda | Odyssey \\| EX |",
+        "",
+        "Notes after the table",
+    ]
+
+
+def test_excel_conversion_is_tidied() -> None:
+    book = Workbook()
+    sheet = book.active
+    assert sheet is not None
+    for row in ([None, None, None], [None, "item", "cost"], [None, "mulch", 36]):
+        sheet.append(row)
+    data = io.BytesIO()
+    book.save(data)
+    text = convert(data.getvalue(), "costs.xlsx")
+    assert "NaN" not in text and "Unnamed" not in text
+    assert "| item | cost |" in text and "| mulch | 36 |" in text
+
+
+@pytest.mark.parametrize(("name", "message"), [("scan.pdf", "probably scanned"), ("blank.txt", "No text in this file")])
+def test_no_text_is_said(name: str, message: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    class Empty:
+        text_content = " \n\n "
+
+    monkeypatch.setattr("markitdown.MarkItDown.convert_stream", lambda *a, **k: Empty())
+    assert message in convert(b"%PDF-1.4", name)

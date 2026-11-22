@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -111,3 +112,10 @@ def test_http_without_token_is_refused(monkeypatch: pytest.MonkeyPatch, capsys: 
     monkeypatch.delenv("GRAPH_MCP_TOKEN", raising=False)
     assert cli.main(["serve", "--transport", "http", "--host", "0.0.0.0"]) == 2
     assert "HTTP needs a token" in capsys.readouterr().err
+
+
+def test_serve_logs_no_line_per_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(logging.getLogger("httpx"), "level", logging.NOTSET)
+    monkeypatch.setenv("GRAPH_MCP_TIMEZONE", "Mars/Olympus")  # stops serve right after the logging is set up
+    cli.main(["serve"])
+    assert logging.getLogger("httpx").level == logging.WARNING

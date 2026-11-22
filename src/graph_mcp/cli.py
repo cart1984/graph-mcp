@@ -13,6 +13,7 @@ Settings come from environment variables, so every MCP client can pass them the 
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from pathlib import Path
@@ -53,10 +54,17 @@ def make_auth() -> Auth:
     return Auth(client_id=_env("CLIENT_ID"), tenant=_env("TENANT", "consumers"), store=make_store(kind, file))
 
 
+def quiet_logs() -> None:
+    """No log line per request to Graph (the MCP server turns on INFO logging): they'd fill a container's log with
+    message and file ids. Warnings and errors still show."""
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     from graph_mcp.graph import Graph
     from graph_mcp.server import build_server
 
+    quiet_logs()
     auth = make_auth()
     downloads = Path(_env("DOWNLOADS")).expanduser() if _env("DOWNLOADS") else None
     server = build_server(Graph(auth.token), downloads, resolve_timezone())

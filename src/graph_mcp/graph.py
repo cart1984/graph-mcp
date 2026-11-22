@@ -14,6 +14,14 @@ GRAPH = "https://graph.microsoft.com/v1.0"
 MAX_TEXT = 60_000  # characters returned inline; the full file stays on disk
 MAX_CONVERT_BYTES = 25 * 1024 * 1024
 
+# Pictures pasted into text as data URIs: thousands of characters of base64 that no reader can use.
+DATA_URI = re.compile(r"data:[\w.+-]+/[\w.+-]+;base64,[A-Za-z0-9+/=]+")
+# Characters that show as nothing: newsletters pad their preview text with them (zero-width spaces and joiners,
+# the combining grapheme joiner, soft hyphens, byte order marks).
+INVISIBLE = re.compile("[\u00ad\u034f\u200b\u200c\u200e\u200f\u2060\ufeff]")
+NOT_A_VALUE = {"NaN", "nan", "None"}  # how pandas, behind MarkItDown's Excel converter, writes empty cells
+UNNAMED = re.compile(r"Unnamed: \d+")  # ... and headers of columns without one
+
 
 class GraphError(Exception):
     pass
@@ -79,7 +87,59 @@ def to_text(data: bytes, name: str) -> str:
         return f"[Could not convert {suffix or 'the file'} to text: {e}]"
     if looks_binary(text):  # MarkItDown falls back to plain text for unknown types, e.g. a .zip
         return f"[Can't convert {suffix or 'the file'} to text: it looks like a binary file.]"
+    if suffix in (".xlsx", ".xls"):
+        text = tidy_tables(text)
+    text = tidy(text)
+    if not text.strip():
+        if suffix == ".pdf":
+            return "[No text in this PDF: it's probably scanned, or made of pictures.]"
+        return "[No text in this file.]"
     return text
+
+
+def tidy(text: str) -> str:
+    """Text without pasted-in pictures (data URIs) and invisible padding characters."""
+    return INVISIBLE.sub("", DATA_URI.sub("image", text))
+
+
+def _cells(line: str) -> list[str]:
+    return [c.strip() for c in re.split(r"(?<!\\)\|", line.strip()[1:-1])]
+
+
+def _table(lines: list[str]) -> list[str]:
+    """A Markdown table without empty cells spelled NaN, unnamed column headers, and empty rows and columns."""
+    rows = [_cells(line) for line in lines]
+    rule = len(rows) > 1 and all(re.fullmatch(r":?-+:?", c) for c in rows[1] if c)
+    if rule:
+        del rows[1]
+    rows = [["" if c in NOT_A_VALUE or UNNAMED.fullmatch(c) else c for c in r] for r in rows]
+    width = max(len(r) for r in rows)
+    rows = [r + [""] * (width - len(r)) for r in rows]
+    rows = rows[:1] + [r for r in rows[1:] if any(r)]
+    if not any(rows[0]) and len(rows) > 1:  # no header at all (the sheet's headings sit lower): use the first row
+        rows = rows[1:]
+    keep = [i for i in range(width) if any(r[i] for r in rows)]
+    if not keep:
+        return []
+    out = ["| " + " | ".join(r[i] for i in keep) + " |" for r in rows]
+    if rule:
+        out.insert(1, "| " + " | ".join("---" for _ in keep) + " |")
+    return out
+
+
+def tidy_tables(text: str) -> str:
+    """Every Markdown table in `text` tidied (see `_table`); the rest stays as it is."""
+    out: list[str] = []
+    block: list[str] = []
+    for line in [*text.splitlines(), ""]:
+        if line.startswith("|") and line.rstrip().endswith("|") and len(line.strip()) > 1:
+            block.append(line)
+            continue
+        if block:
+            out += _table(block)
+            block = []
+        out.append(line)
+    return "\n".join(out[:-1])
 
 
 def looks_binary(text: str, sample: int = 4000) -> bool:

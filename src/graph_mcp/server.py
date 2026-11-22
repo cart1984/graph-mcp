@@ -15,7 +15,7 @@ from mcp.types import ToolAnnotations
 
 from graph_mcp import __version__
 from graph_mcp.auth import AuthError, NotSignedIn
-from graph_mcp.graph import Graph, GraphError, clip, convert
+from graph_mcp.graph import Graph, GraphError, clip, convert, tidy
 
 SERVER_NAME = "graph"
 READ_ONLY = ToolAnnotations(read_only_hint=True, open_world_hint=True)
@@ -103,7 +103,7 @@ def _event_when(ev: dict) -> str:
 
 def _msg_line(m: dict, zone: ZoneInfo) -> str:
     flags = [f for f, on in (("unread", not m.get("isRead", True)), ("attachments", m.get("hasAttachments"))) if on]
-    preview = " ".join((m.get("bodyPreview") or "").split())[:200]
+    preview = " ".join(tidy(m.get("bodyPreview") or "").split())[:200]
     return (
         f"- {_when(m.get('receivedDateTime'), zone)} | {_addr(m.get('from'))} | "
         f"{m.get('subject') or '(no subject)'}" + (f" [{', '.join(flags)}]" if flags else "") + f"\n  id: {m['id']}"
@@ -221,7 +221,7 @@ def build_server(graph: Graph, downloads: Path | None = None, timezone: str = "U
             f"Date: {_when(m.get('receivedDateTime'), zone)}",
             f"Link: {m.get('webLink')}",
             "",
-            m.get("body", {}).get("content", ""),
+            tidy(m.get("body", {}).get("content", "")),
         ]
         if m.get("hasAttachments"):
             att = graph.get(f"/me/messages/{_q(message_id)}/attachments", {"$select": "id,name,size,contentType"})

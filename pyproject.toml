@@ -1,6 +1,6 @@
 [project]
 name = "graph-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "A read-only MCP server for Microsoft Graph: Outlook mail, OneDrive, OneNote, calendar and contacts."
 readme = "README.md"
 authors = [{ name = "cart1984" }]
